@@ -30,7 +30,11 @@ public struct MapplsDesign: MapplsMapDesignTypeProtocol, Hashable {
 
     /// アカウントの既定スタイル（`setMapplsMapStyle` を呼ばずに SDK に任せる）。
     public static let Default = MapplsDesign(id: "default", styleName: "")
-    public static let StandardDay = MapplsDesign(id: "standard-day", styleName: "standard-day")
-    public static let StandardNight = MapplsDesign(id: "standard-night", styleName: "standard-night")
-    public static let GreyDay = MapplsDesign(id: "grey-day", styleName: "grey-day")
+
+    /// 標準（昼）。どのアカウントにも入っている基本スタイル。
+    ///
+    /// これ以外のスタイルは**アカウント紐付き**で、コンソールで割り当てた名前を
+    /// `MapplsDesign(id:styleName:)` で指定する（存在しない名前は SDK が
+    /// 「style not found」で弾く。実行時の一覧は `getAvailableMapplsMapStyle()`）。
+    public static let StandardDay = MapplsDesign(id: "standard_day", styleName: "standard_day")
 }
