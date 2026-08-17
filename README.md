@@ -10,6 +10,12 @@ Even using the wrapper API, you can still access the native Mappls view if you w
 
 https://mapconductor.com/setup/
 
+### API key
+
+MapConductor does not read Mappls credentials. Initialise the Mappls SDK
+yourself, before the first map is created. Credentials come from the Mappls
+(MapmyIndia) developer console. Keep them out of source control.
+
 ## Usage
 
 ```swift
