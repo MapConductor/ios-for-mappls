@@ -21,7 +21,7 @@ private func siblingPackageExists(_ relativePath: String) -> Bool {
 
 let coreDependency: Package.Dependency = siblingPackageExists("../ios-sdk-core")
     ? .package(path: "../ios-sdk-core")
-    : .package(url: "https://github.com/MapConductor/ios-sdk-core", from: "1.1.4")
+    : .package(url: "https://github.com/MapConductor/ios-sdk-core", from: "1.3.1")
 
 let package = Package(
     name: "mapconductor-for-mappls",
@@ -43,7 +43,7 @@ let package = Package(
         // バイナリ xcframework + MapplsAPIKit が自動で付いてくる。
         .package(url: "https://github.com/mappls-api/mappls-map-ios-distribution.git", from: "6.1.5"),
         // 認証（*.i.conf / *.i.olf の読み込み）に MapplsAPICoreManager を直接使う
-        .package(url: "https://github.com/mappls-api/mappls-api-core-ios-distribution.git", from: "2.1.3"),
+        .package(url: "https://github.com/mappls-api/mappls-api-core-ios-distribution.git", from: "2.1.4"),
     ],
     targets: [
         .target(
