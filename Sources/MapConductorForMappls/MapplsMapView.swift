@@ -10,6 +10,8 @@ public struct MapplsMapView: View {
 
     private let handlers: MapViewHandlers<MapplsViewState>
     private let cameraRestriction: CameraRestriction?
+    private let style: MapViewStyle?
+    private let onStyleDiagnostics: (([String]) -> Void)?
     private let content: () -> MapViewContent
 
     public init(
@@ -22,6 +24,12 @@ public struct MapplsMapView: View {
         onCameraMove: OnCameraMoveHandler? = nil,
         onCameraMoveEnd: OnCameraMoveHandler? = nil,
         sdkInitialize: (() -> Void)? = nil,
+        /// How the map looks, when the app states it rather than naming a
+        /// design. `MapConductorVectorStyle` builds one; what happens
+        /// underneath depends on this backend and the app does not have to
+        /// know.
+        style: MapViewStyle? = nil,
+        onStyleDiagnostics: (([String]) -> Void)? = nil,
         @MapViewContentBuilder content: @escaping () -> MapViewContent = { MapViewContent() }
     ) {
         self.state = state
@@ -35,6 +43,8 @@ public struct MapplsMapView: View {
             sdkInitialize: sdkInitialize
         )
         self.cameraRestriction = cameraRestriction
+        self.style = style
+        self.onStyleDiagnostics = onStyleDiagnostics
         self.content = content
     }
 
@@ -55,6 +65,8 @@ public struct MapplsMapView: View {
                 state: state,
                 cameraRestriction: cameraRestriction,
                 handlers: handlers,
+                style: style,
+                onStyleDiagnostics: onStyleDiagnostics,
                 content: mapContent
             )
         }
@@ -66,6 +78,8 @@ private struct MapplsMapViewRepresentable: UIViewRepresentable {
     let cameraRestriction: CameraRestriction?
 
     let handlers: MapViewHandlers<MapplsViewState>
+    let style: MapViewStyle?
+    let onStyleDiagnostics: (([String]) -> Void)?
     let content: MapViewContent
 
     func makeCoordinator() -> Coordinator {
@@ -149,6 +163,9 @@ private struct MapplsMapViewRepresentable: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: MGLMapView, context: Context) {
+        // Every evaluation of the app's `body` lands here; most calls do
+        // nothing. See `MapViewStyleHost.apply`.
+        context.coordinator.applyStyle(style, onDiagnostics: onStyleDiagnostics)
         uiView.contentScaleFactor = UIScreen.main.scale
         uiView.layer.contentsScale = UIScreen.main.scale
         // デザインが実際に変わったときだけ setMapplsMapStyle を呼ぶ
@@ -177,6 +194,7 @@ private struct MapplsMapViewRepresentable: UIViewRepresentable {
     }
 
     static func dismantleUIView(_ uiView: MGLMapView, coordinator: Coordinator) {
+        coordinator.disposeStyle()
         coordinator.unbind()
         uiView.delegate = nil
     }
