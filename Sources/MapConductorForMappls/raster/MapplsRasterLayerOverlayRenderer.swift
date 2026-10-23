@@ -14,7 +14,20 @@ final class MapplsRasterLayer {
 @MainActor
 final class MapplsRasterLayerOverlayRenderer: AbstractRasterLayerOverlayRenderer<MapplsRasterLayer> {
     private weak var mapView: MGLMapView?
-    private var style: MGLStyle?
+    private var loadedStyle: MGLStyle?
+
+    /// The style, only while it is the one the map draws.
+    ///
+    /// `MGLMapView.style` is nil while a new style loads and a different
+    /// object once it has. The object handed to `onStyleLoaded` outlives the
+    /// native style it wrapped, and touching it after a handoff reads freed
+    /// memory: a raster layer removed while a design change was replacing the
+    /// style took Mappls down with a SIGSEGV in `removeLayerSync`. A layer
+    /// skipped here is made again by `onStyleLoaded` for the new style.
+    private var style: MGLStyle? {
+        guard let loadedStyle, let current = mapView?.style, current === loadedStyle else { return nil }
+        return loadedStyle
+    }
 
     init(mapView: MGLMapView?) {
         self.mapView = mapView
@@ -22,11 +35,11 @@ final class MapplsRasterLayerOverlayRenderer: AbstractRasterLayerOverlayRenderer
     }
 
     func onStyleLoaded(_ style: MGLStyle) {
-        self.style = style
+        loadedStyle = style
     }
 
     func unbind() {
-        style = nil
+        loadedStyle = nil
         mapView = nil
     }
 
