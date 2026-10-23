@@ -21,7 +21,7 @@ private func siblingPackageExists(_ relativePath: String) -> Bool {
 
 let coreDependency: Package.Dependency = siblingPackageExists("../ios-sdk-core")
     ? .package(path: "../ios-sdk-core")
-    : .package(url: "https://github.com/MapConductor/ios-sdk-core", from: "1.3.1")
+    : .package(url: "https://github.com/MapConductor/ios-sdk-core", from: "1.3.2")
 
 let package = Package(
     name: "mapconductor-for-mappls",
