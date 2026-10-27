@@ -6,6 +6,7 @@ import MapplsMap
 @MainActor
 final class MapplsGroundImageController: SlottedOverlayController {
     private weak var mapView: MGLMapView?
+    private weak var loadedStyle: MGLStyle?
     private let renderer: MapplsGroundImageOverlayRenderer
     private let groundImageManager: GroundImageManager<MapplsGroundImageHandle>
 
@@ -24,7 +25,18 @@ final class MapplsGroundImageController: SlottedOverlayController {
     }
 
     func onStyleLoaded(_ style: MGLStyle) {
+        let styleChanged = loadedStyle !== style
+        loadedStyle = style
         renderer.onStyleLoaded(style)
+
+        // 新しい MGLStyle は古いスタイルに作ったソースもレイヤも持たない。覚えている
+        // ハンドルを捨て、markReady が流す最後の一式で全部作り直させる。捨てないと
+        // 状態の変わらない画像は「適用済み」として飛ばされ、古いスタイルと一緒に消える。
+        // `MapplsRasterLayerController.onStyleLoaded` と同じ。
+        if styleChanged {
+            groundImageManager.clear()
+        }
+
         styleGate.markReady()
     }
 
