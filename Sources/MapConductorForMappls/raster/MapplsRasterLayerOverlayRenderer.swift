@@ -29,6 +29,9 @@ final class MapplsRasterLayerOverlayRenderer: AbstractRasterLayerOverlayRenderer
         return loadedStyle
     }
 
+    /// Whether a layer added now goes into the style the map shows.
+    var isStyleLoaded: Bool { style != nil }
+
     init(mapView: MGLMapView?) {
         self.mapView = mapView
         super.init()
