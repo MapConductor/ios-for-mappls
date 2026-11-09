@@ -67,11 +67,7 @@ final class MapplsRasterLayerOverlayRenderer: AbstractRasterLayerOverlayRenderer
         if state.debug {
             NSLog("[MapConductor] RasterLayer debug mode: id=%@", state.id)
         }
-        if state.id == PolygonTiler.layerId {
-            insertPolygonTiles(layer, style: style)
-        } else {
-            insertLayer(layer, zIndex: state.zIndex, style: style)
-        }
+        insertLayer(layer, zIndex: state.zIndex, style: style)
 
         return MapplsRasterLayer(source: source, layer: layer)
     }
@@ -80,27 +76,6 @@ final class MapplsRasterLayerOverlayRenderer: AbstractRasterLayerOverlayRenderer
     /// style's own layers always stay below. Mapping zIndex to a raw style
     /// index put zIndex=0 layers at the bottom of the style stack — beneath
     /// the basemap — so they rendered but were never visible.
-    /// Polygon tiles are polygons drawn as images, not imagery: they go where the
-    /// SDK's own polygon layers do, over the basemap (labels included) and under
-    /// polylines, circles and markers. js-sdk-core's Mappls renderer places them
-    /// the same way.
-    private func insertPolygonTiles(_ layer: MGLRasterStyleLayer, style: MGLStyle) {
-        let overlays = [
-            "mapconductor-polygons-fill-",
-            "mapconductor-polygons-line-",
-            "mapconductor-polylines-layer-",
-            "mapconductor-circles-layer-",
-            "mapconductor-cluster-layer-",
-            "mapconductor-markers-layer-",
-            "mapconductor-tile-markers-layer-",
-        ]
-        if let anchor = style.layers.first(where: { layer in overlays.contains { layer.identifier.hasPrefix($0) } }) {
-            style.insertLayer(layer, below: anchor)
-        } else {
-            style.addLayer(layer)
-        }
-    }
-
     private func insertLayer(_ layer: MGLRasterStyleLayer, zIndex: Int, style: MGLStyle) {
         zIndexByLayerId[layer.identifier] = zIndex
         // ポリゴンのタイル（PolygonTiler）もこの経路で載る。帯はレイヤ ID から決める。
