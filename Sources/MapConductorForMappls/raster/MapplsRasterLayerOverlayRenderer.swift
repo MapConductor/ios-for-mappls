@@ -70,11 +70,7 @@ final class MapplsRasterLayerOverlayRenderer: AbstractRasterLayerOverlayRenderer
         if state.debug {
             NSLog("[MapConductor] RasterLayer debug mode: id=%@", state.id)
         }
-        if state.id == PolygonTiler.layerId {
-            insertPolygonTiles(layer, style: style)
-        } else {
-            insertLayer(layer, zIndex: state.zIndex, style: style)
-        }
+        insertLayer(layer, zIndex: state.zIndex, style: style)
 
         return MapplsRasterLayer(source: source, layer: layer)
     }
@@ -83,59 +79,16 @@ final class MapplsRasterLayerOverlayRenderer: AbstractRasterLayerOverlayRenderer
     /// style's own layers always stay below. Mapping zIndex to a raw style
     /// index put zIndex=0 layers at the bottom of the style stack — beneath
     /// the basemap — so they rendered but were never visible.
-    /// Polygon tiles are polygons drawn as images, not imagery: they go where the
-    /// SDK's own polygon layers do, over the basemap (labels included) and under
-    /// polylines, circles and markers. js-sdk-core's Mappls renderer places them
-    /// the same way.
-    private func insertPolygonTiles(_ layer: MGLRasterStyleLayer, style: MGLStyle) {
-        let overlays = [
-            "mapconductor-polygons-fill-",
-            "mapconductor-polygons-line-",
-            "mapconductor-polylines-layer-",
-            "mapconductor-circles-layer-",
-            "mapconductor-cluster-layer-",
-            "mapconductor-markers-layer-",
-            "mapconductor-tile-markers-layer-",
-        ]
-        if let anchor = style.layers.first(where: { layer in overlays.contains { layer.identifier.hasPrefix($0) } }) {
-            style.insertLayer(layer, below: anchor)
-        } else {
-            style.addLayer(layer)
-        }
-    }
-
     private func insertLayer(_ layer: MGLRasterStyleLayer, zIndex: Int, style: MGLStyle) {
-        let conductorIndices = style.layers.indices.filter {
-            style.layers[$0].identifier.hasPrefix("mapconductor-raster-layer-")
-        }
-        if zIndex >= 0, zIndex < conductorIndices.count {
-            style.insertLayer(layer, at: UInt(conductorIndices[zIndex]))
-            return
-        }
-        if let anchor = firstBasemapLabelLayer(style) {
-            style.insertLayer(layer, below: anchor)
-        } else {
-            style.addLayer(layer)
-        }
+        zIndexByLayerId[layer.identifier] = zIndex
+        // ポリゴンのタイル（PolygonTiler）もこの経路で載る。帯はレイヤ ID から決める。
+        let band = OverlayStacking.band(ofStyleLayerId: layer.identifier) ?? .rasterLayer
+        let key = band == .rasterLayer ? OverlayStackKey(.rasterLayer, zIndex: zIndex) : OverlayStackKey(band)
+        MapplsOverlayStacking.insert(layer, key, into: style, rasterZIndex: zIndexByLayerId)
     }
 
-    /// A raster overlay goes above the basemap's geometry but **below its
-    /// labels**.
-    ///
-    /// Appended at the top of the style instead, it covers the place names,
-    /// road names and shields the backend draws -- a vector tile layer's own
-    /// roads run straight through them, which is what "the labels are under
-    /// the lines" looks like. Every raster overlay we add has the same
-    /// problem, so the rule lives here rather than in each of them.
-    ///
-    /// Our own layers are skipped when looking for the anchor: markers are a
-    /// symbol layer too, and anchoring to them would put the raster back above
-    /// the labels -- and only once a marker existed.
-    private func firstBasemapLabelLayer(_ style: MGLStyle) -> MGLStyleLayer? {
-        style.layers.first {
-            $0 is MGLSymbolStyleLayer && !$0.identifier.hasPrefix("mapconductor-")
-        }
-    }
+    /// 差し込み位置を決めるための、載せているラスターの zIndex（スタイルのレイヤは zIndex を持たない）。
+    private var zIndexByLayerId: [String: Int] = [:]
 
     func updateLayerSync(
         layer: MapplsRasterLayer,
