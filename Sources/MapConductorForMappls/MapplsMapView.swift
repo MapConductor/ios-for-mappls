@@ -1,6 +1,6 @@
 import Combine
 import Foundation
-import MapConductorCore
+@_spi(MapConductorDriver) import MapConductorCore
 import MapplsMap
 import SwiftUI
 import UIKit
@@ -279,6 +279,17 @@ private struct MapplsMapViewRepresentable: UIViewRepresentable {
 
             let polygonController = MapplsPolygonController(mapView: mapView)
             self.polygonController = polygonController
+            // Many polygons are drawn into raster tiles and shown as one raster
+            // layer; taps still resolve against the original shapes.
+            let polygonTiler = PolygonTiler()
+            polygonTiler.onTemplate = { [weak rasterController] template, tileSize in
+                if let template {
+                    await rasterController?.upsert(state: PolygonTiler.rasterLayerState(template: template, tileSize: tileSize))
+                } else {
+                    await rasterController?.removeById(PolygonTiler.layerId)
+                }
+            }
+            polygonController.tiler = polygonTiler
             self.hullPolygonController = MapplsPolygonController(mapView: mapView)
 
             // クリックカスケードとスロット解決がここから kind で引く。
@@ -393,6 +404,7 @@ private struct MapplsMapViewRepresentable: UIViewRepresentable {
             overlayScope?.circleCollector.sync(content.circles.map { $0.state })
             overlayScope?.polylineCollector.sync(content.polylines.map { $0.state })
             overlayScope?.polygonCollector.sync(content.polygons.map { $0.state })
+            polygonController?.tiler?.refreshIfServerMoved()
             for handler in content.polygonSyncHandlers {
                 let hullController = hullPolygonController
                 handler.bindPolygonSync { [weak hullController] states in
