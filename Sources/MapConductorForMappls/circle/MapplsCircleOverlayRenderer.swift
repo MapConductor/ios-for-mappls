@@ -1,4 +1,4 @@
-import MapConductorCore
+@_spi(MapConductorDriver) import MapConductorCore
 import MapplsMap
 import UIKit
 
