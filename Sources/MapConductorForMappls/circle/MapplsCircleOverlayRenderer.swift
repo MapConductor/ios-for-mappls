@@ -51,7 +51,8 @@ final class MapplsCircleOverlayRenderer: AbstractCircleOverlayRenderer<MGLPolygo
     }
 
     override func onPostProcess() async {
-        let features = circleManager.allEntities().compactMap { entity -> MGLPolygonFeature? in
+        let features = circleManager.nativeEntities().compactMap { entity -> MGLPolygonFeature? in
+            guard entity.circle != nil else { return nil }
             let updated = makeFeature(for: entity.state)
             entity.circle = updated
             return updated
