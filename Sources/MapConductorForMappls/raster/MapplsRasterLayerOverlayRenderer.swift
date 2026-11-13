@@ -1,4 +1,4 @@
-import MapConductorCore
+@_spi(MapConductorDriver) import MapConductorCore
 import MapplsMap
 
 final class MapplsRasterLayer {
@@ -14,7 +14,23 @@ final class MapplsRasterLayer {
 @MainActor
 final class MapplsRasterLayerOverlayRenderer: AbstractRasterLayerOverlayRenderer<MapplsRasterLayer> {
     private weak var mapView: MGLMapView?
-    private var style: MGLStyle?
+    private var loadedStyle: MGLStyle?
+
+    /// The style, only while it is the one the map draws.
+    ///
+    /// `MGLMapView.style` is nil while a new style loads and a different
+    /// object once it has. The object handed to `onStyleLoaded` outlives the
+    /// native style it wrapped, and touching it after a handoff reads freed
+    /// memory: a raster layer removed while a design change was replacing the
+    /// style took Mappls down with a SIGSEGV in `removeLayerSync`. A layer
+    /// skipped here is made again by `onStyleLoaded` for the new style.
+    private var style: MGLStyle? {
+        guard let loadedStyle, let current = mapView?.style, current === loadedStyle else { return nil }
+        return loadedStyle
+    }
+
+    /// Whether a layer added now goes into the style the map shows.
+    var isStyleLoaded: Bool { style != nil }
 
     init(mapView: MGLMapView?) {
         self.mapView = mapView
@@ -22,11 +38,11 @@ final class MapplsRasterLayerOverlayRenderer: AbstractRasterLayerOverlayRenderer
     }
 
     func onStyleLoaded(_ style: MGLStyle) {
-        self.style = style
+        loadedStyle = style
     }
 
     func unbind() {
-        style = nil
+        loadedStyle = nil
         mapView = nil
     }
 
@@ -64,15 +80,15 @@ final class MapplsRasterLayerOverlayRenderer: AbstractRasterLayerOverlayRenderer
     /// index put zIndex=0 layers at the bottom of the style stack — beneath
     /// the basemap — so they rendered but were never visible.
     private func insertLayer(_ layer: MGLRasterStyleLayer, zIndex: Int, style: MGLStyle) {
-        let conductorIndices = style.layers.indices.filter {
-            style.layers[$0].identifier.hasPrefix("mapconductor-raster-layer-")
-        }
-        if zIndex >= 0, zIndex < conductorIndices.count {
-            style.insertLayer(layer, at: UInt(conductorIndices[zIndex]))
-        } else {
-            style.addLayer(layer)
-        }
+        zIndexByLayerId[layer.identifier] = zIndex
+        // ポリゴンのタイル（PolygonTiler）・ポリラインのタイル（PolylineTiler）もこの経路で載る。
+        // キーはレイヤ ID から決める（ポリラインのタイルはポリラインの帯の一番下）。
+        let key = OverlayStacking.rasterKey(styleLayerId: layer.identifier, zIndex: zIndex)
+        MapplsOverlayStacking.insert(layer, key, into: style, rasterZIndex: zIndexByLayerId)
     }
+
+    /// 差し込み位置を決めるための、載せているラスターの zIndex（スタイルのレイヤは zIndex を持たない）。
+    private var zIndexByLayerId: [String: Int] = [:]
 
     func updateLayerSync(
         layer: MapplsRasterLayer,

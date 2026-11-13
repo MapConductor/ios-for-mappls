@@ -1,6 +1,6 @@
 import Combine
 import Foundation
-import MapConductorCore
+@_spi(MapConductorDriver) import MapConductorCore
 import MapplsMap
 import SwiftUI
 import UIKit
@@ -10,6 +10,8 @@ public struct MapplsMapView: View {
 
     private let handlers: MapViewHandlers<MapplsViewState>
     private let cameraRestriction: CameraRestriction?
+    private let style: MapViewStyle?
+    private let onStyleDiagnostics: (([String]) -> Void)?
     private let content: () -> MapViewContent
 
     public init(
@@ -22,6 +24,12 @@ public struct MapplsMapView: View {
         onCameraMove: OnCameraMoveHandler? = nil,
         onCameraMoveEnd: OnCameraMoveHandler? = nil,
         sdkInitialize: (() -> Void)? = nil,
+        /// How the map looks, when the app states it rather than naming a
+        /// design. `MapConductorVectorStyle` builds one; what happens
+        /// underneath depends on this backend and the app does not have to
+        /// know.
+        style: MapViewStyle? = nil,
+        onStyleDiagnostics: (([String]) -> Void)? = nil,
         @MapViewContentBuilder content: @escaping () -> MapViewContent = { MapViewContent() }
     ) {
         self.state = state
@@ -35,6 +43,8 @@ public struct MapplsMapView: View {
             sdkInitialize: sdkInitialize
         )
         self.cameraRestriction = cameraRestriction
+        self.style = style
+        self.onStyleDiagnostics = onStyleDiagnostics
         self.content = content
     }
 
@@ -55,6 +65,8 @@ public struct MapplsMapView: View {
                 state: state,
                 cameraRestriction: cameraRestriction,
                 handlers: handlers,
+                style: style,
+                onStyleDiagnostics: onStyleDiagnostics,
                 content: mapContent
             )
         }
@@ -66,6 +78,8 @@ private struct MapplsMapViewRepresentable: UIViewRepresentable {
     let cameraRestriction: CameraRestriction?
 
     let handlers: MapViewHandlers<MapplsViewState>
+    let style: MapViewStyle?
+    let onStyleDiagnostics: (([String]) -> Void)?
     let content: MapViewContent
 
     func makeCoordinator() -> Coordinator {
@@ -149,6 +163,9 @@ private struct MapplsMapViewRepresentable: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: MGLMapView, context: Context) {
+        // Every evaluation of the app's `body` lands here; most calls do
+        // nothing. See `MapViewStyleHost.apply`.
+        context.coordinator.applyStyle(style, onDiagnostics: onStyleDiagnostics)
         uiView.contentScaleFactor = UIScreen.main.scale
         uiView.layer.contentsScale = UIScreen.main.scale
         // デザインが実際に変わったときだけ setMapplsMapStyle を呼ぶ
@@ -177,6 +194,7 @@ private struct MapplsMapViewRepresentable: UIViewRepresentable {
     }
 
     static func dismantleUIView(_ uiView: MGLMapView, coordinator: Coordinator) {
+        coordinator.disposeStyle()
         coordinator.unbind()
         uiView.delegate = nil
     }
@@ -261,6 +279,37 @@ private struct MapplsMapViewRepresentable: UIViewRepresentable {
 
             let polygonController = MapplsPolygonController(mapView: mapView)
             self.polygonController = polygonController
+            // Many polygons are drawn into raster tiles and shown as one raster
+            // layer; taps still resolve against the original shapes.
+            let polygonTiler = PolygonTiler()
+            polygonTiler.onTemplate = { [weak rasterController] template, tileSize in
+                if let template {
+                    await rasterController?.upsert(state: PolygonTiler.rasterLayerState(template: template, tileSize: tileSize))
+                } else {
+                    await rasterController?.removeById(PolygonTiler.layerId)
+                }
+            }
+            polygonController.tiler = polygonTiler
+            // Many polylines likewise, in their own raster layer in the polyline band
+            // (under the natively drawn polylines); taps still resolve against the original lines.
+            let polylineTiler = PolylineTiler()
+            polylineTiler.onTemplate = { [weak rasterController] template, tileSize in
+                if let template {
+                    await rasterController?.upsert(state: PolylineTiler.rasterLayerState(template: template, tileSize: tileSize))
+                } else {
+                    await rasterController?.removeById(PolylineTiler.layerId)
+                }
+            }
+            polylineController.tiler = polylineTiler
+            let circleTiler = CircleTiler()
+            circleTiler.onTemplate = { [weak rasterController] template, tileSize in
+                if let template {
+                    await rasterController?.upsert(state: CircleTiler.rasterLayerState(template: template, tileSize: tileSize))
+                } else {
+                    await rasterController?.removeById(CircleTiler.layerId)
+                }
+            }
+            circleController.tiler = circleTiler
             self.hullPolygonController = MapplsPolygonController(mapView: mapView)
 
             // クリックカスケードとスロット解決がここから kind で引く。
@@ -271,6 +320,7 @@ private struct MapplsMapViewRepresentable: UIViewRepresentable {
             controller.registerOverlayController(polygonController)
             controller.registerOverlayController(groundImageController)
             controller.registerOverlayController(rasterController)
+            controller.clearOverlaysHandler = { [weak self] in await self?.clearOverlays() }
 
             let overlayScope = MapOverlayScope()
             self.overlayScope = overlayScope
@@ -315,6 +365,19 @@ private struct MapplsMapViewRepresentable: UIViewRepresentable {
             )
         }
 
+        /// android-sdk の `clearOverlays()` と同じく、各オーバーレイのコントローラを空にする。
+        /// `controller.clearOverlaysHandler` から呼ばれる。
+        func clearOverlays() async {
+            await markerController?.clear()
+            await polylineController?.clear()
+            await polygonController?.clear()
+            await groundImageController?.clear()
+            await circleController?.clear()
+            await rasterController?.clear()
+            // strategy（クラスタリングなど）が描いたマーカーも消す。
+            await state.serviceRegistry.clearMarkerRendering()
+        }
+
         func unbind() {
             // 登録した capability を取り下げる。レジストリの持ち主は state で、ビューより長生きするため、
             // ここで外さないと破棄済みのコントローラを掴んだまま残る。
@@ -352,6 +415,7 @@ private struct MapplsMapViewRepresentable: UIViewRepresentable {
         func updateContent(_ content: MapViewContent) {
             if let mapView {
                 polylineController?.setCurrentCameraPosition(currentCameraPosition(from: mapView))
+                circleController?.setCurrentCameraPosition(currentCameraPosition(from: mapView))
             }
             infoBubbleCoordinator?.syncInfoBubbles(content.infoBubbles)
             markerController?.tilingOptions = content.markerTilingOptions
@@ -361,6 +425,11 @@ private struct MapplsMapViewRepresentable: UIViewRepresentable {
             overlayScope?.circleCollector.sync(content.circles.map { $0.state })
             overlayScope?.polylineCollector.sync(content.polylines.map { $0.state })
             overlayScope?.polygonCollector.sync(content.polygons.map { $0.state })
+            polygonController?.tiler?.refreshIfServerMoved()
+            if polylineController?.tiler?.setOptions(content.polylineTilingOptions) == true { overlayScope?.polylineCollector.flush() }
+            if circleController?.tiler?.setOptions(content.circleTilingOptions) == true { overlayScope?.circleCollector.flush() }
+            polylineController?.tiler?.refreshIfServerMoved()
+            circleController?.tiler?.refreshIfServerMoved()
             for handler in content.polygonSyncHandlers {
                 let hullController = hullPolygonController
                 handler.bindPolygonSync { [weak hullController] states in
@@ -433,6 +502,7 @@ private struct MapplsMapViewRepresentable: UIViewRepresentable {
         func mapView(_ mapView: MGLMapView, regionWillChangeAnimated animated: Bool) {
             let camera = currentCameraPosition(from: mapView)
             polylineController?.setCurrentCameraPosition(camera)
+            circleController?.setCurrentCameraPosition(camera)
             controller?.notifyCameraMoveStart(camera)
             onCameraMoveStart?(camera)
             // Removed async Task calls to prevent crashes
@@ -447,6 +517,7 @@ private struct MapplsMapViewRepresentable: UIViewRepresentable {
             let camera = currentCameraPosition(from: mapView)
             state.updateCameraPosition(camera)
             polylineController?.setCurrentCameraPosition(camera)
+            circleController?.setCurrentCameraPosition(camera)
             controller?.notifyCameraMove(camera)
             onCameraMove?(camera)
             // Removed async Task calls to prevent crashes
@@ -465,6 +536,7 @@ private struct MapplsMapViewRepresentable: UIViewRepresentable {
             if controller?.applyCameraRestrictionCorrectionIfNeeded(camera) == true { return }
             state.updateCameraPosition(camera)
             polylineController?.setCurrentCameraPosition(camera)
+            circleController?.setCurrentCameraPosition(camera)
             controller?.notifyCameraMoveEnd(camera)
             onCameraMoveEnd?(camera)
             // Removed async Task calls to prevent crashes
@@ -481,6 +553,7 @@ private struct MapplsMapViewRepresentable: UIViewRepresentable {
 
             // Ensure polyline hit-testing uses the current zoom even if no region-change callbacks have fired yet.
             polylineController?.setCurrentCameraPosition(currentCameraPosition(from: mapView))
+            circleController?.setCurrentCameraPosition(currentCameraPosition(from: mapView))
 
             if markerController?.handleTap(at: point) == true {
                 updateInfoBubbleLayouts()
@@ -542,9 +615,32 @@ private struct MapplsMapViewRepresentable: UIViewRepresentable {
                 farLeft: corners?.farLeft,
                 farRight: corners?.farRight
             )
-            return mapView.toMapCameraPosition(
+            // 地図の中心はパディングの分ずらしてある。ターゲット（パディングを除いた領域の中央）へ戻す。
+            // 画面内なら地図の投影で直接読む。画面の外（パディングが地図より大きい）なら計算で戻す。
+            // 地図は安全領域の内側の中央を中心にしているので、計算は安全領域から測ったパディングで行う。
+            let raw = mapView.toMapCameraPosition(
                 logicalTiltHint: controller?.lastLogicalTilt,
                 visibleRegion: visibleRegion
+            )
+            let paddings = controller?.lastPaddings
+            let size = mapView.bounds.size
+            let computed = CameraPaddingEmulation.target(
+                forCameraCenter: raw.position,
+                camera: raw,
+                paddings: MapplsViewController.safeAreaRelative(paddings, on: mapView),
+                fov: mapplsVerticalFieldOfView,
+                viewportSize: size
+            )
+            return CameraPaddingEmulation.restored(
+                raw,
+                paddings: paddings,
+                fov: mapplsVerticalFieldOfView,
+                viewportSize: size,
+                unproject: { point in
+                    guard mapView.bounds.contains(point) else { return computed }
+                    let coordinate = mapView.convert(point, toCoordinateFrom: mapView)
+                    return GeoPoint(latitude: coordinate.latitude, longitude: coordinate.longitude, altitude: 0)
+                }
             )
         }
 

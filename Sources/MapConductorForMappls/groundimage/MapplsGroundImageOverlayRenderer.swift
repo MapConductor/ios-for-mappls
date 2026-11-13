@@ -1,12 +1,24 @@
 import CoreLocation
 import Foundation
-import MapConductorCore
+@_spi(MapConductorDriver) import MapConductorCore
 import MapplsMap
 
 @MainActor
 final class MapplsGroundImageOverlayRenderer: AbstractGroundImageOverlayRenderer<MapplsGroundImageHandle> {
     private weak var mapView: MGLMapView?
-    private var style: MGLStyle?
+    private var loadedStyle: MGLStyle?
+
+    /// The style, only while it is the one the map draws.
+    ///
+    /// Same rule as `MapplsRasterLayerOverlayRenderer.style`: the object
+    /// handed to `onStyleLoaded` outlives the native style it wrapped. A
+    /// design change and an overlay change in the same SwiftUI update land
+    /// here right after `setMapplsMapStyle`, and removing a ground image from
+    /// the replaced style crashed every time.
+    private var style: MGLStyle? {
+        guard let loadedStyle, let current = mapView?.style, current === loadedStyle else { return nil }
+        return loadedStyle
+    }
 
     init(mapView: MGLMapView?) {
         self.mapView = mapView
@@ -14,11 +26,11 @@ final class MapplsGroundImageOverlayRenderer: AbstractGroundImageOverlayRenderer
     }
 
     func onStyleLoaded(_ style: MGLStyle) {
-        self.style = style
+        loadedStyle = style
     }
 
     func unbind() {
-        style = nil
+        loadedStyle = nil
         mapView = nil
     }
 
@@ -113,28 +125,7 @@ final class MapplsGroundImageOverlayRenderer: AbstractGroundImageOverlayRenderer
     }
 
     private func insertLayer(_ layer: MGLRasterStyleLayer, into style: MGLStyle) {
-        if let below = findBelowLayer(style: style) {
-            style.insertLayer(layer, below: below)
-        } else {
-            style.addLayer(layer)
-        }
-    }
-
-    private func findBelowLayer(style: MGLStyle) -> MGLStyleLayer? {
-        let prefixes = [
-            "mapconductor-polylines-layer-",
-            "mapconductor-polygons-fill-",
-            "mapconductor-polygons-line-",
-            "mapconductor-circles-layer-",
-            "mapconductor-cluster-layer-",
-            "mapconductor-markers-layer-"
-        ]
-        for prefix in prefixes {
-            if let layer = style.layers.first(where: { $0.identifier.hasPrefix(prefix) }) {
-                return layer
-            }
-        }
-        return nil
+        MapplsOverlayStacking.insert(layer, OverlayStackKey(.groundImage), into: style)
     }
 
     private func sourceId(for id: String) -> String {
